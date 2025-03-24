@@ -1,5 +1,7 @@
 package com.virtualbookstore.config;
 
+import java.io.IOException;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +14,14 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.virtualbookstore.filters.JwtFilter;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 @Configuration
 public class SecurityConfig {
@@ -30,18 +38,24 @@ public class SecurityConfig {
         return authenticationConfiguration.getAuthenticationManager();
     }
 
-
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(csrf -> csrf.disable())  // 🔥 Disable CSRF (not needed for JWT-based APIs)
+            .csrf(csrf -> csrf.disable())  
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/users/register", "/users/login").permitAll()  // ✅ Only register/login are public
-                .requestMatchers(HttpMethod.DELETE, "/users/delete/**").authenticated() // ✅ Require authentication for DELETE
+                .requestMatchers("/users/register", "/users/login").permitAll() 
+                .requestMatchers(HttpMethod.POST, "/books/add").hasRole("ADMIN")  
+                .requestMatchers(HttpMethod.GET, "/books/**", "/books/category/**").permitAll()  
+                .requestMatchers(HttpMethod.DELETE, "/books/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/orders/user").authenticated()  
+                .requestMatchers(HttpMethod.POST, "/orders").authenticated()  
+                .requestMatchers(HttpMethod.PUT, "/orders/**").authenticated()  
+                .requestMatchers(HttpMethod.DELETE, "/orders/**").authenticated()  
                 .anyRequest().authenticated()
             )
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class) 
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+
         return http.build();
     }
 
@@ -50,4 +64,3 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 }
-

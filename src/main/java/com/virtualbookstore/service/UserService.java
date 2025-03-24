@@ -1,5 +1,7 @@
 package com.virtualbookstore.service;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -97,4 +99,16 @@ System.out.println("user : "+user);
 
         userRepository.delete(userToDelete);
     }
-}
+
+		public List<User> getAllUsers(String token) {
+	        String email = jwtUtil.extractUserName(token);
+	        User requestingUser = userRepository.findByEmail(email)
+	                .orElseThrow(() -> new RuntimeException("User not found"));
+
+	        if (!requestingUser.getRole().equals(User.Role.ADMIN)) {
+	            throw new RuntimeException("Unauthorized! Only admins can access user list.");
+	        }
+
+	        return userRepository.findAll();
+	    }
+	}

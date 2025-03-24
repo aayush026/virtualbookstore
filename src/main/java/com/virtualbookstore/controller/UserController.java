@@ -1,6 +1,7 @@
 package com.virtualbookstore.controller;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,4 +60,15 @@ public class UserController {
 	        return ResponseEntity.status(401).body(e.getMessage());
 	    }
 	}
+	
+	@GetMapping("/all")
+    public ResponseEntity<?> getAllUsers(HttpServletRequest request) {
+        try {
+            String token = userService.extractTokenFromRequest(request);
+            List<User> users = userService.getAllUsers(token); 
+            return ResponseEntity.ok(users);
+        } catch (Exception e) {
+            return ResponseEntity.status(403).body(e.getMessage());
+        }
+    }
 }
