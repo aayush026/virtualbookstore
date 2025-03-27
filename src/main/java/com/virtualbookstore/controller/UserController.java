@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.virtualbookstore.entity.User;
 import com.virtualbookstore.service.UserService;
+import com.virtualbookstore.util.JWTUtil;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -26,6 +27,9 @@ public class UserController {
 	@Autowired
 	private UserService userService;
 
+	@Autowired
+	JWTUtil jwtUtil;
+
 	@PostMapping("/register")
 	public ResponseEntity<User> register(@RequestBody User user) {
 		return ResponseEntity.ok(userService.createUser(user));
@@ -33,6 +37,7 @@ public class UserController {
 
 	@PostMapping("/login")
 	public ResponseEntity<Map<String, String>> login(@RequestBody User user) {
+		System.out.println("UserController.login()");
 		String token = userService.authenticateUser(user.getEmail(), user.getPassword());
 		Map<String, String> response = new HashMap<>();
 		response.put("token", token);
@@ -44,6 +49,9 @@ public class UserController {
 		try {
 			String token = userService.extractTokenFromRequest(request);
 			UserDetails userDetails = userService.getUserDetails(token);
+			System.out.println("userDetails :  " + userDetails.toString());
+			String username = jwtUtil.extractUserName(token);
+			System.out.println("username :  " + username);
 			return ResponseEntity.ok(userDetails);
 		} catch (Exception e) {
 			return ResponseEntity.status(401).body(e.getMessage());
@@ -52,23 +60,23 @@ public class UserController {
 
 	@DeleteMapping("/delete")
 	public ResponseEntity<?> deleteUser(HttpServletRequest request, @RequestParam("email") String email) {
-	    try {
-	        String token = userService.extractTokenFromRequest(request);
-	        userService.deleteUserByEmail(token, email);
-	        return ResponseEntity.ok("User deleted successfully");
-	    } catch (Exception e) {
-	        return ResponseEntity.status(401).body(e.getMessage());
-	    }
+		try {
+			String token = userService.extractTokenFromRequest(request);
+			userService.deleteUserByEmail(token, email);
+			return ResponseEntity.ok("User deleted successfully");
+		} catch (Exception e) {
+			return ResponseEntity.status(401).body(e.getMessage());
+		}
 	}
-	
+
 	@GetMapping("/all")
-    public ResponseEntity<?> getAllUsers(HttpServletRequest request) {
-        try {
-            String token = userService.extractTokenFromRequest(request);
-            List<User> users = userService.getAllUsers(token); 
-            return ResponseEntity.ok(users);
-        } catch (Exception e) {
-            return ResponseEntity.status(403).body(e.getMessage());
-        }
-    }
+	public ResponseEntity<?> getAllUsers(HttpServletRequest request) {
+		try {
+			String token = userService.extractTokenFromRequest(request);
+			List<User> users = userService.getAllUsers(token);
+			return ResponseEntity.ok(users);
+		} catch (Exception e) {
+			return ResponseEntity.status(403).body(e.getMessage());
+		}
+	}
 }

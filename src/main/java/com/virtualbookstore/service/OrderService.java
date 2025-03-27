@@ -1,82 +1,158 @@
 package com.virtualbookstore.service;
 
-
-
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import com.virtualbookstore.dto.CreateOrderRequestDTO;
+import com.virtualbookstore.dto.OrderResponseDTO;
+import com.virtualbookstore.dto.exception.InsufficientStockException;
+import com.virtualbookstore.dto.exception.OrderCancellationException;
+import com.virtualbookstore.dto.exception.OrderNotFoundException;
+import com.virtualbookstore.entity.Book;
 import com.virtualbookstore.entity.Order;
+import com.virtualbookstore.entity.OrderItem;
 import com.virtualbookstore.entity.User;
+import com.virtualbookstore.repo.BookRepo;
 import com.virtualbookstore.repo.OrderRepo;
 import com.virtualbookstore.repo.UserRepo;
-import com.virtualbookstore.util.JWTUtil;
 
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.persistence.EntityNotFoundException;
+import lombok.RequiredArgsConstructor;
 
 @Service
+@RequiredArgsConstructor
+@Transactional
 public class OrderService {
-    
-    @Autowired
-    private OrderRepo orderRepository;
-    
-    @Autowired
-    private UserRepo userRepository;
-    
-    @Autowired
-    private JWTUtil jwtUtil;
-    
-    private String extractUsernameFromRequest(HttpServletRequest request) {
-        String token = request.getHeader("Authorization");
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-        return jwtUtil.extractUserName(token);
-    }
-    
-    public List<Order> getAllOrders(HttpServletRequest request) {
-        extractUsernameFromRequest(request);
-        return orderRepository.findAll();
-    }
-    
-    public Optional<Order> getOrderById(Long id, HttpServletRequest request) {
-        String username = extractUsernameFromRequest(request);
-        return orderRepository.findById(id)
-                .filter(order -> order.getUser().getUsername().equals(username));
-    }
-    
-    public List<Order> getOrdersByUser(HttpServletRequest request) {
-        String username = extractUsernameFromRequest(request);
-        return orderRepository.findByUser_Email(username);
-    }
-    
-    public Order createOrder(Order order, HttpServletRequest request) {
-        String username = extractUsernameFromRequest(request);
-        User user = userRepository.findByEmail(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+    private final OrderRepo orderRepository;
+    private final UserRepo userRepository;
+    private final BookRepo bookRepository;
+
+    @Transactional
+    public OrderResponseDTO createOrder(String email, List<CreateOrderRequestDTO.OrderItemRequest> items) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+
+        Order order = new Order();
         order.setUser(user);
-        return orderRepository.save(order);
+        order.setStatus(Order.OrderStatus.PENDING);
+
+        List<OrderItem> orderItems = new ArrayList<>();
+        BigDecimal totalPrice = BigDecimal.ZERO;
+
+        for (CreateOrderRequestDTO.OrderItemRequest item : items) {
+            Book book = bookRepository.findById(item.getBookId())
+                    .orElseThrow(() -> new EntityNotFoundException("Book not found"));
+
+            if (book.getStock() < item.getQuantity()) {
+                throw new InsufficientStockException("Not enough stock for book: " + book.getTitle());
+            }
+
+            book.setStock(book.getStock() - item.getQuantity());
+            bookRepository.save(book);
+
+            BigDecimal itemPrice = BigDecimal.valueOf(book.getPrice())
+                    .multiply(BigDecimal.valueOf(item.getQuantity()));
+            totalPrice = totalPrice.add(itemPrice);
+
+            OrderItem orderItem = OrderItem.builder()
+                    .order(order)
+                    .book(book)
+                    .quantity(item.getQuantity())
+                    .pricePerUnit(BigDecimal.valueOf(book.getPrice()))
+                    .build();
+
+            orderItems.add(orderItem);
+        }
+
+        order.setOrderItems(orderItems);
+        order.setTotalPrice(totalPrice);
+        Order savedOrder = orderRepository.save(order);
+
+        return convertToDto(savedOrder);
     }
 
-    
-    public Order updateOrder(Long id, Order orderDetails, HttpServletRequest request) {
-        String username = extractUsernameFromRequest(request);
-        return orderRepository.findById(id)
-                .filter(order -> order.getUser().getUsername().equals(username))
-                .map(order -> {
-                    order.setStatus(orderDetails.getStatus());
-                    order.setTotalAmount(orderDetails.getTotalAmount());
-                    return orderRepository.save(order);
-                }).orElseThrow(() -> new RuntimeException("Order not found or unauthorized"));
+    @Transactional(readOnly = true)
+    public List<OrderResponseDTO> getAllOrders() {
+        return orderRepository.findAllWithItems().stream()
+                .map(this::convertToDto)
+                .toList();
     }
-    
-    public void deleteOrder(Long id, HttpServletRequest request) {
-        String username = extractUsernameFromRequest(request);
-        Order order = orderRepository.findById(id)
-                .filter(o -> o.getUser().getUsername().equals(username))
-                .orElseThrow(() -> new RuntimeException("Order not found or unauthorized"));
-        orderRepository.delete(order);
+
+    @Transactional(readOnly = true)
+    public List<OrderResponseDTO> getOrdersByUser(String email) {
+        return orderRepository.findByUserEmailWithItems(email).stream()
+                .map(this::convertToDto)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponseDTO getOrderDetails(String email, Long orderId) throws Exception {
+        Order order = orderRepository.findByIdAndUserEmailWithItems(orderId, email)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        return convertToDto(order);
+    }
+
+    @Transactional
+    public OrderResponseDTO updateOrderStatus(Long orderId, Order.OrderStatus status) throws Exception {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        order.setStatus(status);
+        return convertToDto(orderRepository.save(order));
+    }
+
+    @Transactional
+    public void cancelOrder(String email, Long orderId) throws Exception {
+        Order order = orderRepository.findByIdAndUserEmailWithItems(orderId, email)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        
+        if (order.getStatus() != Order.OrderStatus.PENDING) {
+            throw new OrderCancellationException("Only PENDING orders can be cancelled");
+        }
+        
+        order.setStatus(Order.OrderStatus.CANCELLED);
+        
+        order.getOrderItems().forEach(item -> {
+            Book book = item.getBook();
+            book.setStock(book.getStock() + item.getQuantity());
+            bookRepository.save(book);
+        });
+        
+        orderRepository.save(order);
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal estimateOrderTotal(List<CreateOrderRequestDTO.OrderItemRequest> items) {
+        return items.stream()
+                .map(item -> {
+                    Book book = bookRepository.findById(item.getBookId())
+                            .orElseThrow(() -> new EntityNotFoundException("Book not found"));
+                    return BigDecimal.valueOf(book.getPrice())
+                            .multiply(BigDecimal.valueOf(item.getQuantity()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private OrderResponseDTO convertToDto(Order order) {
+        return OrderResponseDTO.builder()
+                .id(order.getId())
+                .totalPrice(order.getTotalPrice())
+                .status(order.getStatus())
+                .orderDate(order.getOrderDate())
+                .items(new ArrayList<>()) 
+                .build();
+    }
+
+
+    private OrderResponseDTO.OrderItemResponse convertOrderItemToDto(OrderItem orderItem) {
+        return OrderResponseDTO.OrderItemResponse.builder()
+                .bookTitle(orderItem.getBook().getTitle())
+                .bookIsbn(orderItem.getBook().getIsbn())
+                .quantity(orderItem.getQuantity())
+                .pricePerUnit(orderItem.getPricePerUnit())
+                .build();
     }
 }

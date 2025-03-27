@@ -1,6 +1,8 @@
 package com.virtualbookstore.entity;
 
 
+import java.math.BigDecimal;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -18,8 +20,8 @@ import lombok.ToString;
 
 @Entity
 @Table(name = "books")
-@Getter
 @Setter
+@Getter
 @NoArgsConstructor
 @AllArgsConstructor
 @ToString
@@ -47,6 +49,9 @@ public class Book {
 
     @Column(length = 500)
     private String imageUrl;
+    
+    @Column(nullable = false, unique = true, length = 17) // ISBN-13 max length
+    private String isbn;
 
     // Linking Books to Users (Only Admins can create books)
     @ManyToOne

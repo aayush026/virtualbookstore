@@ -12,6 +12,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.http.HttpServletRequest;
 
 @Component
 public class JWTUtil {
@@ -66,5 +67,24 @@ public class JWTUtil {
 	    public boolean isTokenValid(String token, String username) {
 	        final String extractedUsername = extractUserName(token);
 	        return (extractedUsername.equals(username) && !isTokenExpired(token));
+	    }
+	    
+	    private String extractTokenFromRequest(HttpServletRequest request) {
+	        String authorizationHeader = request.getHeader("Authorization");
+	        if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+	            return authorizationHeader.substring(7);
+	        }
+	        throw new RuntimeException("JWT Token missing or invalid");
+	    }
+
+	    public String extractUsername(String token) {
+	        return extractClaims(token).getSubject();
+	    }
+
+	    private Claims extractClaims(String token) {
+	        return Jwts.parser()
+	                .setSigningKey(secretKey.getBytes())
+	                .parseClaimsJws(token)
+	                .getBody();
 	    }
 }
